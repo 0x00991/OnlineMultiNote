@@ -1,3 +1,5 @@
+STANDALONE = False
+
 from aiohttp import web
 from aiohttp.web import Response, Request, HTTPTemporaryRedirect
 import os
@@ -6,7 +8,7 @@ import json
 from tools import EncryptEngine, blank, sha2, checkncreatedir
 import time
 from threading import Thread
-
+from note_cont import get as GET_NOTE_HTML
 checkncreatedir("notes")
 
 if not os.path.isfile("settings.json"):
@@ -38,8 +40,7 @@ else:
 
 eengine = EncryptEngine(getpass("Enter File PW > "))
 
-with open("./note.html", "r", encoding="utf-8") as f:
-    NOTE_HTML = f.read()
+NOTE_HTML = GET_NOTE_HTML(STANDALONE)
 
 def formathtml(notename, content):
     return NOTE_HTML.replace("<<--note-->>", notename)\

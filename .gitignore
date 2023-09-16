@@ -2,3 +2,7 @@
 notes/
 __pycache__/
 settings.json
+build/
+dist/
+*.spec
+b64encode.py

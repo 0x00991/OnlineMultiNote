@@ -1,5 +1,3 @@
-STANDALONE = False
-
 from aiohttp import web
 from aiohttp.web import Response, Request, HTTPTemporaryRedirect
 import os
@@ -8,7 +6,14 @@ import json
 from tools import EncryptEngine, blank, sha2, checkncreatedir
 import time
 from threading import Thread
-from note_cont import get as GET_NOTE_HTML
+import secrets
+import sys
+
+try:
+    root_path = sys._MEIPASS
+except:
+    root_path = "."
+
 checkncreatedir("notes")
 
 if not os.path.isfile("settings.json"):
@@ -40,13 +45,9 @@ else:
 
 eengine = EncryptEngine(getpass("Enter File PW > "))
 
-NOTE_HTML = GET_NOTE_HTML(STANDALONE)
+with open(f"{root_path}/note.html", "r", encoding="utf-8") as f:
+    NOTE_HTML = f.read()
 
-def formathtml(notename, content):
-    return NOTE_HTML.replace("<<--note-->>", notename)\
-        .replace("<<--text-->>", content)\
-        .replace("<<--pass-->>", WEB_PW)\
-        .replace("<<--ischecked-->>", "checked" if WEB_AUTOSAVE else "")
 
 def HTMLResponse(body):
     return Response(body=body, charset="utf-8", content_type="text/html")
@@ -74,6 +75,12 @@ def web_delete(request: Request):
     note = request.rel_url.query.get("note", None)
     if not note:
         return
+    
+    session = request.rel_url.query.get("session", "None") # 세션이 오래된 것이면 받지 않음
+    
+    if session != NEWEST_SESSION.get(note, "--------"):
+        return Response(body=f"Expired Session", status=208)
+
     if os.path.isfile(f"notes/{note}"):
         os.remove(f"notes/{note}")
     if CONTENTS.__contains__(note):
@@ -97,7 +104,15 @@ def web_getnote(request: Request):
                 f.write(b"")
         except:
             return HTTPTemporaryRedirect(location=f"/?pass={WEB_PW}")
-    return HTMLResponse(formathtml(note, readfile(note)))
+    session = secrets.token_urlsafe(8)
+    NEWEST_SESSION[note] = session
+    
+    return HTMLResponse(NOTE_HTML.replace("<<--note-->>", note)\
+        .replace("<<--text-->>", readfile(note))\
+        .replace("<<--pass-->>", WEB_PW)\
+        .replace("<<--ischecked-->>", "checked" if WEB_AUTOSAVE else "")
+        .replace("<<--session-->>", session)
+    )
 
 
 
@@ -143,6 +158,8 @@ def force_save(note):
 
 Thread(target=saver, daemon=True).start()
 
+NEWEST_SESSION = {} # notename: SESSION
+
 @routes.post("/{note}")
 async def web_savenote(request: Request):
     global WEB_AUTOSAVE
@@ -152,6 +169,11 @@ async def web_savenote(request: Request):
         res.status = 404
         return res
     start = time.time()
+
+    session = request.rel_url.query.get("session", "None") # 세션이 오래된 것이면 받지 않음
+    
+    if session != NEWEST_SESSION.get(note, "--------"):
+        return Response(body=f"Expired Session", status=208)
     
     post = await request.post()
     

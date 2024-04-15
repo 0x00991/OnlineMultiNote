@@ -15,63 +15,85 @@
     }
 </style>
 
-<script>
-    var last_sent = "";
-    var last_req_sent = true;
-
-    function save(note_content, autosave) {
-        if (autosave == true && last_sent == note_content) { return false; }
-
-        if (last_req_sent == false && autosave == true) {
-            return false;
-        }
-
-        if (autosave) {
-            last_req_sent = false;
-        }
-
-
-        last_sent = note_content;
-
-        var xhttp = new XMLHttpRequest();
-        xhttp.onreadystatechange = function () {
-            if (this.readyState == 4) {
-                if (this.status == 200) {
-                    document.getElementById("savestatus").innerHTML = "Saved. (" + this.responseText + ")";
-                }
-                else {
-                    document.getElementById("savestatus").innerHTML = "Save Error. (" + this.responseText + ")";
-                }
-
-                if (autosave) {
-                    last_req_sent = true;
-                }
-            }
-        }
-        if (autosave == true) {
-            xhttp.open("POST", "/<<--note-->>?pass=<<--pass-->>&autosave=true", true);
-        }
-        else {
-            xhttp.open("POST", "/<<--note-->>?pass=<<--pass-->>", true);
-        }
-
-        var data = new FormData();
-        data.append("text", note_content);
-        document.getElementById("savestatus").innerHTML = "Saving... Don't close tab!";
-        xhttp.send(data);
-    }
-
-</script>
-
 <body>
-    <input type="checkbox" id="check" <<--ischecked-->>>자동저장
+    <span style="color: gray" id="sessiont">SES<<--session-->></span><br>
+    <input type="checkbox" id="check" <<--ischecked-->>>자동저장 <input type="checkbox" id="readonly" checked> 읽기전용
     <input type="button" id="btn" value="저장">
     <input type="button" onclick="del()" value="삭제">
     <span id="savestatus">Loaded.</span>
     <br>
     <textarea id="notepad" placeholder="Note"><<--text-->></textarea>
-
     <script>
+        var last_sent = document.getElementById("notepad").value;
+        var last_req_sent = true;
+        var new_request_made = false;
+        var session = "<<--session-->>";
+        
+        function gotoprev() {
+            if(new_request_made) {
+                return false;
+            }
+            setTimeout(function() {
+                if(new_request_made) {
+                    return false;
+                }
+                document.getElementById("savestatus").innerHTML = "Standby";
+            }, 1000);
+        }
+        function save(note_content, autosave) {
+            if (autosave == true && last_sent == note_content) { return false; }
+    
+            if (last_req_sent == false && autosave == true) {
+                return false;
+            }
+    
+            if (autosave) {
+                last_req_sent = false;
+            }
+    
+    
+            last_sent = note_content;
+    
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function () {
+                if (this.readyState == 4) {
+                    new_request_made = false;
+                    gotoprev();
+                    let resp = this.responseText;
+                    if(resp === "Expired Session") {
+                        document.getElementById("sessiont").innerHTML = "SES"+session+" [EXPIRED]";
+                        document.getElementById("sessiont").style.color = "red";
+                        document.getElementById("sessiont").style.fontWeight = 700;
+                        document.getElementById("readonly").checked = true;
+                        document.getElementById("readonly").disabled = true;
+                        document.getElementById("btn").disabled = true;
+                    }
+                    if (this.status == 200) {
+                        document.getElementById("savestatus").innerHTML = "Saved. (" + this.responseText + ")";
+                    }
+                    else {
+                        document.getElementById("savestatus").innerHTML = "Save Error. (" + this.responseText + ")";
+                    }
+    
+                    if (autosave) {
+                        last_req_sent = true;
+                    }
+                }
+            }
+            if (autosave == true) {
+                xhttp.open("POST", "/<<--note-->>?pass=<<--pass-->>&autosave=true&session="+session, true);
+            }
+            else {
+                xhttp.open("POST", "/<<--note-->>?pass=<<--pass-->>&session="+session, true);
+            }
+    
+            var data = new FormData();
+            data.append("text", note_content);
+            document.getElementById("savestatus").innerHTML = "Saving... Don't close tab!";
+            xhttp.send(data);
+            new_request_made = true;
+        }
+
         document.getElementById("notepad").style = "font-family: Arial; font-size: 12pt; width: 100%; height:95%;";
 
         document.getElementById("btn").addEventListener("click", function () { save(document.getElementById("notepad").value, false); });
@@ -80,10 +102,17 @@
             if (document.getElementById("check").checked) {
                 save(document.getElementById("notepad").value, true);
             }
+
+            if(document.getElementById("readonly").checked) {
+                document.getElementById("notepad").readOnly = true;
+            }
+            else {
+                document.getElementById("notepad").readOnly = false;
+            }
         }, 800);
 
         function del() {
-            location.href = "/delete?note=<<--note-->>&pass=<<--pass-->>"
+            location.href = "/delete?note=<<--note-->>&pass=<<--pass-->>&session=<<--session-->>"
         }
     </script>
 </body>

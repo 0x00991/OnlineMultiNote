@@ -1,5 +1,6 @@
-from aiohttp import web
-from aiohttp.web import Response, Request, HTTPTemporaryRedirect, FileResponse
+from fastapi import FastAPI, Request, Form
+from fastapi.responses import Response, RedirectResponse
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 import os
 from getpass import getpass
 import json
@@ -8,7 +9,7 @@ import time
 from threading import Thread
 import secrets
 import sys
-
+from typing import Annotated
 try:
     root_path = sys._MEIPASS
 except:
@@ -50,37 +51,32 @@ with open(f"{root_path}/note.html", "r", encoding="utf-8") as f:
 
 
 def HTMLResponse(body):
-    return Response(body=body, charset="utf-8", content_type="text/html")
-@web.middleware
-async def middleware(request: Request, handler):
-    if request.rel_url.query.get("pass", None) != WEB_PW:
-        if request.path != "/favicon.ico":
-            return web.Response(body="", status=500)
-        
-    resp = await handler(request)
-    
-    return resp
+    return Response(content=body, media_type="text/html;charset=utf-8")
 
-app = web.Application(client_max_size=MAXSIZE, middlewares=[middleware])
-routes = web.RouteTableDef()
+class AuthHandler(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
+        if request.query_params.get("pass") != WEB_PW:
+            if request.url.path != "/favicon.ico":
+                return Response(content="", status_code=401)
+        return await call_next(request)
 
-@routes.get("/")
+app = FastAPI(docs_url=None, redoc_url=None)
+app.add_middleware(AuthHandler)
+
+@app.get("/")
 def web_main(request: Request):
-    ret = f"""<input id="create" placeholder="Note Name"><input type="button" value="Go" onclick="location.href = '/'+document.getElementById('create').value+'?pass={WEB_PW}';"><br>"""
+    ret = f"""<title>Main - OMN</title><input id="create" placeholder="Note Name"><input type="button" value="Go" onclick="location.href = '/'+document.getElementById('create').value+'?pass={WEB_PW}';"><br>"""
     for nn in os.listdir("notes/"):
         ret += f"""<a href="/{nn}?pass={WEB_PW}">/{nn}</a><br>"""
     return HTMLResponse(ret)
 
-@routes.get("/delete")
-def web_delete(request: Request):
-    note = request.rel_url.query.get("note", None)
+@app.get("/delete")
+def web_delete(request: Request, note: str = None, session: str = None):
     if not note:
         return
     
-    session = request.rel_url.query.get("session", "None") # 세션이 오래된 것이면 받지 않음
-    
     if session != NEWEST_SESSION.get(note, "--------"):
-        return Response(body=f"Expired Session", status=208)
+        return Response(content=f"Expired Session", status_code=208)
 
     if os.path.isfile(f"notes/{note}"):
         os.remove(f"notes/{note}")
@@ -88,28 +84,28 @@ def web_delete(request: Request):
         del CONTENTS[note]
     if CONTENTS_SHA2.__contains__(note):
         del CONTENTS_SHA2[note]
-    return HTTPTemporaryRedirect(location=f"/?pass={WEB_PW}")
+        
+    return RedirectResponse(url=f"/?pass={WEB_PW}")
 
-BLACK_NAMES = ["'", "\"", "&", ";", "/", "<", ">", "*", ":", "|", ".."]
-@routes.get("/{note}")
-def web_getnote(request: Request):
-    note = request.match_info.get("note", None)
-    if note is None:
-        return HTTPTemporaryRedirect(location=f"/?pass={WEB_PW}")
-
+BLACK_NAMES = ["'", "\"", "&", ";", "/", "<", ">", "*", ":", "|", "..", "main"]
+@app.get("/{note}")
+def web_getnote(request: Request, note: str):
     if note == "favicon.ico":
-        return Response(body=favicon_file, content_type="image/x-icon")
+        return Response(content=favicon_file, media_type="image/x-icon")
 
     for bn in BLACK_NAMES:
         if note.find(bn) != -1:
-            return HTTPTemporaryRedirect(location=f"/?pass={WEB_PW}")
+            return RedirectResponse(url=f"/?pass={WEB_PW}")
+        
     if not os.path.isfile(f"notes/{note}"):
         try:
             with open(f"notes/{note}", "wb") as f:
                 f.write(b"")
         except:
-            return HTTPTemporaryRedirect(location=f"/?pass={WEB_PW}")
+            return RedirectResponse(url=f"/?pass={WEB_PW}")
+        
     session = secrets.token_urlsafe(8)
+    
     NEWEST_SESSION[note] = session
     
     return HTMLResponse(NOTE_HTML.replace("<<--note-->>", note)\
@@ -117,6 +113,7 @@ def web_getnote(request: Request):
         .replace("<<--pass-->>", WEB_PW)\
         .replace("<<--ischecked-->>", "checked" if WEB_AUTOSAVE else "")
         .replace("<<--session-->>", session)
+        .replace("<<--note-->>", note)
     )
 
 
@@ -165,31 +162,34 @@ Thread(target=saver, daemon=True).start()
 
 NEWEST_SESSION = {} # notename: SESSION
 
-@routes.post("/{note}")
-async def web_savenote(request: Request):
+@app.post("/{note}")
+def web_savenote(request: Request, note: str, session: str = None, autosave: str = None, text: Annotated[str, Form()] = None):
     global WEB_AUTOSAVE
-    note = request.match_info.get("note", None)
+    
     if note is None or not os.path.isfile(f"notes/{note}"):
         res = HTMLResponse("Error not found")
         res.status = 404
         return res
     start = time.time()
 
-    session = request.rel_url.query.get("session", "None") # 세션이 오래된 것이면 받지 않음
     
     if session != NEWEST_SESSION.get(note, "--------"):
-        return Response(body=f"Expired Session", status=208)
+        return Response(content=f"Expired Session", status_code=208)
     
-    post = await request.post()
-    
-    CONTENTS[note] = post["text"]
-    WEB_AUTOSAVE = request.rel_url.query.get("autosave", None) == "true"
+    CONTENTS[note] = text
+    WEB_AUTOSAVE = autosave == "true"
     
     end = time.time()
-    return Response(body=f"{round((end-start)*1000, 2)}ms")
+    return Response(content=f"{round((end-start)*1000, 2)}ms")
 
 with open(os.path.join(root_path, "favicon.ico"), "rb") as f:
     favicon_file = f.read()
 
-app.add_routes(routes)
-web.run_app(app, host="0.0.0.0", port=2053)
+import uvicorn
+
+ssl_options = {}
+if os.path.isfile(f"{root_path}/server.key"):
+    ssl_options["ssl_certfile"] = f"{root_path}/server.pem"
+    ssl_options["ssl_keyfile"] = f"{root_path}/server.key"
+
+uvicorn.run(app, host="0.0.0.0", port=2053, **ssl_options, ws_max_size=16*1000**2)

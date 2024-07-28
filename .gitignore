@@ -5,3 +5,6 @@ settings.json
 build/
 dist/
 *.spec
+server.pem
+server.key
+favicon.png
